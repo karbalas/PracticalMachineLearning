@@ -1,0 +1,104 @@
+Practical Machine Learning: Project1
+====================================
+
+**Background:**  
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this report, I will use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from this [website][1].  
+
+**Summary:**   
+The training data for my machine learning algorithm was taken from [here][2]. The model I create using the training data set will be finally applied on the test data found [here][3] to predict the manner in which they did the exercise. 'classe' variable is the expected outcome from the model.  
+
+***Data Processing:***  
+1. First we load the data. Download the training and test data if necessary, and then load the data to trainData and testData.  
+```{r loading, results='hide', cache=TRUE}
+setwd("D://PracticalMachineLearning")
+if (!file.exists("pml-training.csv")) { 
+  download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", destfile="pml-training.csv")
+  download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", destfile="pml-testing.csv")
+} 
+trainData <- read.csv("pml-training.csv");testData <- read.csv("pml-testing.csv");
+```
+  
+2. Clean data of unnecessary predictor variables. This is done in 3 steps. First step check for predictors with less than 60% missing values to be included. Second step eliminates nearZeroVar. Finally, we eliminate the columns related to timestamp, user or those columns in which the data is ordered. Since the user or ordered columns or timestamp may vary for test data, our model should not depend on those column so that it can predict with better accuracy. Split trainData into training/testing data sets for conducting the model fit and predictions that best explains the data.  
+```{r DataSplitting,results='hide', cache=TRUE, warning=FALSE}
+library(caret); set.seed(4321)
+fn <- function(col1, data) { 
+    if ((length(data[is.na(data[,col1]),col1])/length(data[,col1])) < 0.6) {
+        names(data)[col1]
+    } else {""}
+}
+cols <- sapply(1:dim(trainData)[2],fn,trainData) #reduce features based on NA in testData
+trainData <- trainData[, which(names(trainData) %in% cols)]
+trainData <- trainData[, c(-1:-6)] # Drop the user, ordered and timestamp columns
+nsv <- nearZeroVar(trainData, saveMetrics=TRUE); cols <- row.names(nsv)[nsv$nzv!=TRUE]
+trainData <- trainData[, which(names(trainData) %in% cols)]
+trainIndex = createDataPartition(trainData$classe, p=0.6,list=FALSE)
+trainingData = trainData[trainIndex,]; testingData = trainData[-trainIndex,]
+```
+  
+*Model1: Using rpart2 method*  
+*Cross-validations:* For rpart2 method, number of folds / cross validation sets is set to 16.  
+
+3. Create model to fit the data, identifying the outcome and predictors and using 'rpart2' method to use.  
+```{r ModelFit1, cache=TRUE, warning=FALSE}
+set.seed(33134); modelFit1 <- train(classe ~ ., data=trainingData, method="rpart2", trControl = trainControl(method="cv",number = 16));  
+```
+  
+4. Plot the model and glean any insights from the model data.  
+```{r PlotModel1, fig.width=7, fig.height=6}
+plot(modelFit1);  
+```
+From the plot of the 'rpart2' based model, we can see that the best accuracy using max tree depth of 7 is still 65%. This is not a pleasing modelFit and might be error prone about 35% of the time.  
+  
+5. Predict the values for testingData using the model created for fitting the training data and compare the out of box sample error for the predicted values using the confusion matrix.  
+```{r PredictData1, cache=TRUE, warning=FALSE}
+pred1 <- predict(modelFit1, newdata=testingData)
+matrix2 <- confusionMatrix(pred1, testingData$classe) 
+```
+  
+with the first model using rpar2 method, our expected out of sample error rate (incorrect predictions) is `r round(100*(1-modelFit1$results[3,2]), 2)`%. Our Accuracy (correct predictions) for the prediction is `r round(100*(modelFit1$results[3,2]),2)`%. This matches our observation from the plot of the modelFit1 above.  
+  
+*Model2: Using Random Forest method*  
+*Cross-validations:* RandomForest uses 25 cross-validation / resampling by default. By setting the number of samples to 6. random forest method will do 5 cross-validation samples with 3 mtry settings (combinations of predictors/features). Final model is selected based on the best of the 3 mtry settings and 5 different samples. With random forest method, there is no need to do separate cross-validations using k-folds or other methods.  
+  
+7. Create model to fit the data, identifying the outcome and predictors and using a random forest method to use.  
+```{r ModelFit, cache=TRUE, warning=FALSE} 
+set.seed(33134); modelFit <- train(classe ~ ., data=trainingData, method="rf", prox=TRUE, trControl = trainControl(method="cv",number = 5)); 
+print(modelFit)
+```
+  
+8. Plot the 4 most important predictors from the model and glean any insights from the model data.  
+```{r PlotModel, fig.width=7, fig.height=6}
+library(caret)
+#varImp(modelFit)
+featurePlot (x=trainingData[,c("num_window","roll_belt","pitch_forearm",'yaw_belt')],y=trainingData$classe,plot="pairs")
+```
+  
+```{r PlotModel0, fig.width=7, fig.height=6}
+plot(modelFit)
+```
+  
+From the plot of the modelFit, we can see that the best accuracy obtained was around 99.6% which is very promising and would predict with less than 0.4% error rates. This is the best of the 2 modelFits and we would choose this randomForest based modelFit anytime, given a choice.  
+```{r finalModel}
+print(modelFit$finalModel) 
+```
+  
+With the second model using randomForest method, our expected out of sample error rate (incorrectly identified) is `r round(100*(modelFit$finalModel$err.rate[modelFit$finalModel$ntree,"OOB"]),2)`%. Our Accuracy (correctly identified) for the prediction is `r   round(100*(1 - modelFit$finalModel$err.rate[modelFit$finalModel$ntree,"OOB"]),2)`%.  
+  
+9. Predict the values for testingData using the model created for fitting the training data and ompare the out of box sample error for the predicted values using the confusion matrix.  
+```{r PredictData, cache=TRUE, warning=FALSE}
+pred <- predict(modelFit, newdata=testingData)
+matrix1 <- confusionMatrix(pred, testingData$classe)
+print(matrix1) 
+```
+  
+From the confusion matrix, we can see that 13 values were predicted incorrectly out of 7833 estimated values, with an Accuracy of `r round(100*((7833-13)/7833),2)`% and error rate of `r round(100*(13/7833),2)`%.
+  
+**Conclusion:**  
+1. Of most of the models, random forest based model performs better with an accuracy of `r   round(100*(1 - modelFit$finalModel$err.rate[modelFit$finalModel$ntree,"OOB"]),2)`%.   
+2. Only 13 out of 7833 overall predicted values were incorrect with an error rate of `r round(100*(13/7833),2)`% for random forest with an Accuracy of `r round(100*((7833-13)/7833),2)`%.  
+3. Our estimated out of sample error is close to actual out of sample error observed from the predicted values of the testing data.
+  
+[1]:    http://groupware.les.inf.puc-rio.br/har "website"
+[2]:    https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv   "here"
+[3]:    https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv    "here"
+
